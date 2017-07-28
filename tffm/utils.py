@@ -206,5 +206,8 @@ def loss_logistic(outputs, y):
     return tf.minimum(raw_loss, 100, name='truncated_log_loss')
 
 def loss_mse(outputs, y):
-    return tf.pow(y -  tf.transpose(outputs), 2, name='mse_loss')
+    return tf.pow(y - tf.transpose(outputs), 2, name='mse_loss')
 
+
+def loss_wmse(outputs, y, c):
+    return tf.pow(tf.multiply(y - tf.transpose(outputs), c), 2, name='wmse_loss')

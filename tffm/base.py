@@ -46,7 +46,49 @@ def batcher(X_, y_=None, batch_size=-1):
         yield (ret_x, ret_y)
 
 
-def batch_to_feeddict(X, y, core):
+def batcher_with_conf(X_, y_=None, batch_size=-1, c_=None):
+    """Split data to mini-batches.
+
+    Parameters
+    ----------
+    X_ : {numpy.array, scipy.sparse.csr_matrix}, shape (n_samples, n_features)
+        Training vector, where n_samples in the number of samples and
+        n_features is the number of features.
+
+    y_ : np.array or None, shape (n_samples,)
+        Target vector relative to X.
+
+    c_ : np.array,  shape (n_samples,)
+        confidence score for observations
+
+    batch_size : int
+        Size of batches.
+        Use -1 for full-size batches
+
+    Yields
+    -------
+    ret_x : {numpy.array, scipy.sparse.csr_matrix}, shape (batch_size, n_features)
+        Same type as input
+    ret_y : np.array or None, shape (batch_size,)
+    ret_c : np.array, shape (batch_size,)
+    """
+    n_samples = X_.shape[0]
+
+    if batch_size == -1:
+        batch_size = n_samples
+    if batch_size < 1:
+       raise ValueError('Parameter batch_size={} is unsupported'.format(batch_size))
+
+    for i in range(0, n_samples, batch_size):
+        upper_bound = min(i + batch_size, n_samples)
+        ret_x = X_[i:upper_bound]
+        ret_y = None
+        ret_c = c_[i:upper_bound] if c_ is not None else None
+        if y_ is not None:
+            ret_y = y_[i:i + batch_size]
+        yield (ret_x, ret_y, ret_c)
+
+def batch_to_feeddict(X, y, core, c=None):
     """Prepare feed dict for session.run() from mini-batch.
     Convert sparse format into tuple (indices, values, shape) for tf.SparseTensor
     Parameters
@@ -58,6 +100,8 @@ def batch_to_feeddict(X, y, core):
         Target vector relative to X.
     core : TFFMCore
         Core used for extract appropriate placeholders
+    c : np.array
+        confidence scores
     Returns
     -------
     fd : dict
@@ -76,6 +120,8 @@ def batch_to_feeddict(X, y, core):
         fd[core.raw_shape] = np.array(X_sparse.shape).astype(np.int64)
     if y is not None:
         fd[core.train_y] = y.astype(np.float32)
+    if c is not None:
+        fd[core.c] = c.astype(np.float32)
     return fd
 
 
@@ -185,7 +231,7 @@ class TFFMBaseModel(six.with_metaclass(ABCMeta, BaseEstimator)):
     def preprocess_target(self, target):
         """Prepare target values to use."""
 
-    def fit(self, X_, y_, n_epochs=None, show_progress=False):
+    def fit(self, X_, y_, n_epochs=None, show_progress=False, c_=None):
         if self.core.n_features is None:
             self.core.set_num_features(X_.shape[1])
 
@@ -210,8 +256,8 @@ class TFFMBaseModel(six.with_metaclass(ABCMeta, BaseEstimator)):
             perm = np.random.permutation(X_.shape[0])
             epoch_loss = []
             # iterate over batches
-            for bX, bY in batcher(X_[perm], y_=used_y[perm], batch_size=self.batch_size):
-                fd = batch_to_feeddict(bX, bY, core=self.core)
+            for bX, bY, bC in batcher_with_conf(X_[perm], y_=used_y[perm], batch_size=self.batch_size, c_=c_):
+                fd = batch_to_feeddict(bX, bY, core=self.core, c=bC)
                 ops_to_run = [self.core.trainer, self.core.target, self.core.summary_op]
                 result = self.session.run(ops_to_run, feed_dict=fd)
                 _, batch_target_value, summary_str = result
